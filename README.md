@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # La Petite Maison de l'Épouvante
 
 Plateforme de vente en ligne de produits horrifiques et fantastiques.
@@ -74,3 +75,7 @@ docker compose --profile dev up --build
 # Installer k6 : https://k6.io/docs/get-started/installation/
 k6 run k6/load-test.js
 ```
+=======
+# PetiteMaisonEpouvante
+Projet PetiteMaisonEpouvante CESI
+>>>>>>> b98a4dbf9fcd6732ae65a2a52f98151e083efb7a
