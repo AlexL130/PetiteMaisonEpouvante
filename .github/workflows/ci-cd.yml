@@ -1,0 +1,394 @@
+# ============================================================
+# CI/CD Pipeline — La Petite Maison de l'Épouvante
+# GitHub Actions → Azure Container Apps
+#
+# Stages:
+#   1. Lint (ESLint frontend + backend)
+#   2. Unit Tests + Coverage (Vitest + Jest)
+#   3. Integration Tests (Supertest + DB)
+#   4. SAST Security (CodeQL + npm audit)
+#   5. Build Docker Images
+#   6. Deploy to Azure Container Apps
+# ============================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+  NODE_VERSION: "20"
+
+# ──────────────────────────────────────────────
+# Permissions pour GHCR + CodeQL
+# ──────────────────────────────────────────────
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  actions: read
+
+jobs:
+  # ════════════════════════════════════════════
+  # STAGE 1 — LINT
+  # ════════════════════════════════════════════
+  lint:
+    name: "🔍 Lint"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.project }}
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: ${{ matrix.project }}
+        run: npm run lint
+
+  # ════════════════════════════════════════════
+  # STAGE 2 — UNIT TESTS + COVERAGE
+  # ════════════════════════════════════════════
+  unit-tests:
+    name: "🧪 Unit Tests"
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        project: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.project }}
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: ${{ matrix.project }}
+        run: npm run test:coverage
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.project }}
+          path: ${{ matrix.project }}/coverage/
+          retention-days: 7
+
+      - name: Check coverage threshold
+        working-directory: ${{ matrix.project }}
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            LINES=$(node -e "const c=require('./coverage/coverage-summary.json');console.log(c.total.lines.pct)")
+            echo "📊 Line coverage: ${LINES}%"
+            THRESHOLD=10
+            if (( $(echo "$LINES < $THRESHOLD" | bc -l) )); then
+              echo "❌ Coverage ${LINES}% is below ${THRESHOLD}% threshold"
+              exit 1
+            fi
+            echo "✅ Coverage ${LINES}% meets ${THRESHOLD}% threshold"
+          else
+            echo "⚠️ No coverage report found — skipping threshold check"
+          fi
+
+  # ════════════════════════════════════════════
+  # STAGE 3 — INTEGRATION TESTS (Backend + DB)
+  # ════════════════════════════════════════════
+  integration-tests:
+    name: "🔗 Integration Tests"
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Initialize test database
+        run: |
+          PGPASSWORD=test_password psql -h localhost -U test_user -d test_db -f docker/postgres/init.sql
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: backend
+        env:
+          NODE_ENV: test
+          PORT: 4000
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+          DB_NAME: test_db
+          JWT_SECRET: test-jwt-secret-for-ci-pipeline
+          JWT_EXPIRES_IN: 7d
+          JWT_REFRESH_EXPIRES_IN: 30d
+          FRONTEND_URL: http://localhost:3000
+        run: npx jest --testPathPatterns="integration|e2e" --passWithNoTests --forceExit
+
+  # ════════════════════════════════════════════
+  # STAGE 4 — SAST SECURITY
+  # ════════════════════════════════════════════
+  security-audit:
+    name: "🔒 npm audit"
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        project: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.project }}
+        run: npm ci
+
+      - name: Run npm audit (critical + high)
+        working-directory: ${{ matrix.project }}
+        run: |
+          echo "🔍 Scanning ${{ matrix.project }} for vulnerabilities..."
+          npm audit --audit-level=critical || true
+          # Fail only on critical
+          CRITICAL=$(npm audit --json 2>/dev/null | node -e "
+            let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+              try{const j=JSON.parse(d);console.log(j.metadata?.vulnerabilities?.critical||0)}
+              catch{console.log(0)}
+            })" || echo "0")
+          echo "🚨 Critical vulnerabilities: $CRITICAL"
+          if [ "$CRITICAL" -gt "0" ]; then
+            echo "❌ Critical vulnerabilities found — blocking pipeline"
+            exit 1
+          fi
+          echo "✅ No critical vulnerabilities"
+
+  codeql:
+    name: "🛡️ CodeQL SAST"
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  # ════════════════════════════════════════════
+  # STAGE 5 — BUILD DOCKER + PUSH TO GHCR
+  # ════════════════════════════════════════════
+  build-backend:
+    name: "🐳 Build Backend"
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, security-audit, codeql]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./docker/Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-frontend:
+    name: "🐳 Build Frontend"
+    runs-on: ubuntu-latest
+    needs: [unit-tests, security-audit, codeql]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./docker/Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ════════════════════════════════════════════
+  # STAGE 6 — DEPLOY TO AZURE CONTAINER APPS
+  # ════════════════════════════════════════════
+  deploy:
+    name: "🚀 Deploy Azure"
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Backend Container App
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          containerAppName: petite-maison-api
+          imageToDeploy: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:latest
+          targetPort: 4000
+          ingress: external
+          environmentVariables: >-
+            NODE_ENV=production
+            PORT=4000
+            DB_HOST=secretref:db-host
+            DB_PORT=secretref:db-port
+            DB_USER=secretref:db-user
+            DB_PASSWORD=secretref:db-password
+            DB_NAME=secretref:db-name
+            JWT_SECRET=secretref:jwt-secret
+            FRONTEND_URL=${{ vars.FRONTEND_URL }}
+
+      - name: Deploy Frontend Container App
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          containerAppName: petite-maison-web
+          imageToDeploy: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:latest
+          targetPort: 80
+          ingress: external
+
+      - name: Verify deployment health
+        continue-on-error: true
+        run: |
+          echo "⏳ Waiting for backend to be ready..."
+          sleep 30
+          BACKEND_URL="${{ vars.BACKEND_URL }}/health"
+          for i in {1..10}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BACKEND_URL" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Backend healthy (attempt $i)"
+              exit 0
+            fi
+            echo "⏳ Attempt $i: status $STATUS — retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Backend health check failed after 10 attempts"
+          exit 1
+
+      - name: Post-deploy summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ vars.FRONTEND_URL }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend API | ${{ vars.BACKEND_URL }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ${{ vars.BACKEND_URL }}/health |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY

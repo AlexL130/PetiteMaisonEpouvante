@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "npm": "^11.13.0",
+    "pg": "^8.22.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/dotenv": "^6.1.1"
+  }
+}

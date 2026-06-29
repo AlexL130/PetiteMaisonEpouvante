@@ -1,0 +1,118 @@
+# ============================================================
+# k6 Load Tests — La Petite Maison de l'Épouvante
+# Triggered manually or after successful deployment
+# ============================================================
+
+name: "⚡ Load Tests (k6)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "API base URL to test"
+        required: true
+        default: "https://petite-maison-api.wonderfulbush-aa479b2b.francecentral.azurecontainerapps.io"
+      vus:
+        description: "Max virtual users"
+        required: false
+        default: "30"
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  load-test:
+    name: "⚡ k6 Load Test"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          K6_VERSION="v0.54.0"
+          curl -sSL "https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz" -o k6.tar.gz
+          tar xzf k6.tar.gz
+          sudo mv k6-${K6_VERSION}-linux-amd64/k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Warm up backend (cold start)
+        env:
+          API_URL: ${{ github.event.inputs.target_url || vars.BACKEND_URL }}
+        run: |
+          echo "⏳ Warming up backend (may take up to 60s for cold start)..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$API_URL/health" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Backend is warm! (attempt $i)"
+              # Send a few more requests to warm up DB connections
+              curl -s "$API_URL/products" > /dev/null
+              curl -s "$API_URL/categories" > /dev/null
+              curl -s "$API_URL/fanzine/issues" > /dev/null
+              sleep 2
+              echo "✅ Warm-up complete"
+              exit 0
+            fi
+            echo "⏳ Attempt $i: status $STATUS — retrying in 5s..."
+            sleep 5
+          done
+          echo "⚠️ Backend may still be cold, proceeding anyway..."
+
+      - name: Run k6 load test
+        env:
+          API_URL: ${{ github.event.inputs.target_url || vars.BACKEND_URL }}
+        run: |
+          echo "🎯 Target: $API_URL"
+          echo "👥 Testing with up to ${{ github.event.inputs.vus || '30' }} virtual users"
+          k6 run \
+            --out json=k6-results.json \
+            --env API_URL=$API_URL \
+            k6/load-test.js
+
+      - name: Upload k6 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-load-test-results
+          path: |
+            k6-results.json
+            k6-summary.json
+          retention-days: 30
+
+      - name: Parse and display results
+        if: always()
+        run: |
+          echo "## ⚡ k6 Load Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f k6-summary.json ]; then
+            node -e "
+              const fs = require('fs');
+              const data = JSON.parse(fs.readFileSync('k6-summary.json', 'utf8'));
+              const metrics = data.metrics || {};
+
+              const fmt = (v) => v ? v.toFixed(2) : 'N/A';
+              const dur = metrics.http_req_duration?.values || {};
+              const errs = metrics.errors?.values || {};
+              const pList = metrics.product_list_duration?.values || {};
+              const pDetail = metrics.product_detail_duration?.values || {};
+
+              let md = '';
+              md += '| Metric | Value | Threshold | Status |\n';
+              md += '|--------|-------|-----------|--------|\n';
+              md += '| P95 Response Time | ' + fmt(dur['p(95)']) + 'ms | < 2000ms | ' + (dur['p(95)'] < 2000 ? '✅' : '❌') + ' |\n';
+              md += '| P99 Response Time | ' + fmt(dur['p(99)']) + 'ms | — | ℹ️ |\n';
+              md += '| Median Response Time | ' + fmt(dur.med) + 'ms | — | ℹ️ |\n';
+              md += '| Error Rate | ' + fmt((errs.rate || 0) * 100) + '% | < 5% | ' + ((errs.rate || 0) < 0.05 ? '✅' : '❌') + ' |\n';
+              md += '| Product List P95 | ' + fmt(pList['p(95)']) + 'ms | < 1500ms | ' + ((pList['p(95)'] || 0) < 1500 ? '✅' : '❌') + ' |\n';
+              md += '| Product Detail P95 | ' + fmt(pDetail['p(95)']) + 'ms | < 1500ms | ' + ((pDetail['p(95)'] || 0) < 1500 ? '✅' : '❌') + ' |\n';
+              console.log(md);
+            " >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No summary file found" >> $GITHUB_STEP_SUMMARY
+          fi

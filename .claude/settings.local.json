@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(winget install:*)",
+      "Bash(npm ci:*)",
+      "Bash(npm run lint:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfix\\(frontend\\): add missing eslint.config.mjs for ESLint v9\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(curl:*)",
+      "Bash(python -c:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run test:*)",
+      "Bash(npm run test:coverage:*)",
+      "Bash(git commit:*)",
+      "Bash(docker build:*)",
+      "Bash(npm run build:*)"
+    ]
+  }
+}
