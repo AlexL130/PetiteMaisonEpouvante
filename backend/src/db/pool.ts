@@ -14,7 +14,7 @@ export const pool = new Pool({
   ssl: env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
-pool.on("error", (err: { message: any; }) => {
+pool.on("error", (err) => {
   logger.error("Unexpected pool error", { error: err.message });
 });
 
