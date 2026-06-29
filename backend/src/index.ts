@@ -54,6 +54,8 @@ app.use((_req, res) => {
 // ============================================================
 // START SERVER
 // ============================================================
+console.log("PORT =", env.PORT);
+
   async function start() {
   try {
     const dbOk = await checkDbConnection();
@@ -70,5 +72,6 @@ app.use((_req, res) => {
 }
 
 start();
+logger.info("START FUNCTION ENTERED");
 
 export default app; // For tests (supertest)

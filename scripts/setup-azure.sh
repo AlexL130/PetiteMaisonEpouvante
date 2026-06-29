@@ -183,6 +183,7 @@ az containerapp create \
   --environment "$ENV_NAME" \
   --image "mcr.microsoft.com/k8se/quickstart:latest" \
   --target-port 4000 \
+  --env-vars PORT=4000 \
   --ingress external \
   --min-replicas 1 \
   --max-replicas 3 \
