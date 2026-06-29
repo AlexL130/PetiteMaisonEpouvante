@@ -54,14 +54,17 @@ app.use((_req, res) => {
 // ============================================================
 // START SERVER
 // ============================================================
-async function start() {
-  const dbOk = await checkDbConnection();
-  if (!dbOk) {
-    logger.error("Cannot start without database connection");
-    process.exit(1);
+  async function start() {
+  try {
+    const dbOk = await checkDbConnection();
+    if (!dbOk) {
+      logger.warn("DB not ready, starting anyway");
+    }
+  } catch (e) {
+    logger.warn("DB check failed, continuing startup");
   }
 
-  app.listen(env.PORT, () => {
+  app.listen(env.PORT, "0.0.0.0", () => {
     logger.info(`Server running on port ${env.PORT} [${env.NODE_ENV}]`);
   });
 }

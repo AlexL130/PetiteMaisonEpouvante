@@ -53,21 +53,31 @@ echo ""
 # ──────────────────────────────────────────────
 # 1. Resource Group
 # ──────────────────────────────────────────────
+if az group show --name "$RESOURCE_GROUP" &>/dev/null; then
+    echo "✅ Resource Group existe déjà."
+else
 echo "📦 Creating Resource Group: $RESOURCE_GROUP ($LOCATION)..."
 az group create \
   --name "$RESOURCE_GROUP" \
   --location "$LOCATION" \
   --output none
+fi
 
 # ──────────────────────────────────────────────
 # 2. Log Analytics Workspace (pour Container Apps)
 # ──────────────────────────────────────────────
+if az monitor log-analytics workspace show \
+    --resource-group "$RESOURCE_GROUP" \
+    --workspace-name "$LOG_ANALYTICS_WS" &>/dev/null; then
+    echo "✅ Log Analytics Workspace existe déjà."
+else
 echo "📊 Creating Log Analytics Workspace..."
 az monitor log-analytics workspace create \
   --resource-group "$RESOURCE_GROUP" \
   --workspace-name "$LOG_ANALYTICS_WS" \
   --location "$LOCATION" \
   --output none
+fi
 
 LOG_ID=$(az monitor log-analytics workspace show \
   --resource-group "$RESOURCE_GROUP" \
@@ -83,17 +93,30 @@ LOG_KEY=$(az monitor log-analytics workspace get-shared-keys \
 # 3. Container Apps Environment
 # ──────────────────────────────────────────────
 echo "🌍 Creating Container Apps Environment: $ENV_NAME..."
-az containerapp env create \
-  --name "$ENV_NAME" \
-  --resource-group "$RESOURCE_GROUP" \
-  --location "$LOCATION" \
-  --logs-workspace-id "$LOG_ID" \
+if az containerapp env show \
+    --name "$ENV_NAME" \
+    --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+    echo "✅ Container Apps Environment existe déjà."
+else
+    az containerapp env create \
+      --name "$ENV_NAME" \
+      --resource-group "$RESOURCE_GROUP" \
+      --location "$LOCATION" \
+      --logs-workspace-id "$LOG_ID" \
   --logs-workspace-key "$LOG_KEY" \
   --output none
+fi
 
 # ──────────────────────────────────────────────
 # 4. PostgreSQL Flexible Server
 # ──────────────────────────────────────────────
+if az postgres flexible-server show \
+    --name "$PG_SERVER" \
+    --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+
+    echo "✅ PostgreSQL existe déjà."
+
+else
 echo "🐘 Creating PostgreSQL Flexible Server: $PG_SERVER..."
 az postgres flexible-server create \
   --resource-group "$RESOURCE_GROUP" \
@@ -104,6 +127,7 @@ az postgres flexible-server create \
   --tier "Burstable" \
   --storage-size 32 \
   --version 17 \
+  --yes \
   --output none
 
 echo "🔧 Configuring PostgreSQL firewall (allow Azure services)..."
@@ -114,13 +138,23 @@ az postgres flexible-server firewall-rule create \
   --start-ip-address 0.0.0.0 \
   --end-ip-address 0.0.0.0 \
   --output none
+fi
 
+if az postgres flexible-server db show \
+    --server-name "$PG_SERVER" \
+    --resource-group "$RESOURCE_GROUP" \
+    --database-name "$PG_DB" &>/dev/null; then
+
+    echo "✅ Base de données déjà créée."
+
+else
 echo "📝 Creating database: $PG_DB..."
 az postgres flexible-server db create \
   --resource-group "$RESOURCE_GROUP" \
   --server-name "$PG_SERVER" \
   --name "$PG_DB" \
   --output none
+fi
 
 PG_HOST="${PG_SERVER}.postgres.database.azure.com"
 
@@ -135,6 +169,13 @@ PGPASSWORD="$PG_PASSWORD" psql \
 # ──────────────────────────────────────────────
 # 5. Backend Container App
 # ──────────────────────────────────────────────
+if az containerapp show \
+    --name "$BACKEND_APP" \
+    --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+
+    echo "✅ Backend déjà déployé."
+
+else
 echo "🚀 Creating Backend Container App: $BACKEND_APP..."
 az containerapp create \
   --name "$BACKEND_APP" \
@@ -148,6 +189,7 @@ az containerapp create \
   --cpu 0.5 \
   --memory 1.0Gi \
   --output none
+fi
 
 BACKEND_FQDN=$(az containerapp show \
   --name "$BACKEND_APP" \
@@ -189,6 +231,13 @@ az containerapp update \
 # ──────────────────────────────────────────────
 # 6. Frontend Container App
 # ──────────────────────────────────────────────
+if az containerapp show \
+    --name "$FRONTEND_APP" \
+    --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+
+    echo "✅ Frontend déjà déployé."
+
+else
 echo "🚀 Creating Frontend Container App: $FRONTEND_APP..."
 az containerapp create \
   --name "$FRONTEND_APP" \
@@ -202,6 +251,7 @@ az containerapp create \
   --cpu 0.25 \
   --memory 0.5Gi \
   --output none
+fi
 
 FRONTEND_FQDN=$(az containerapp show \
   --name "$FRONTEND_APP" \

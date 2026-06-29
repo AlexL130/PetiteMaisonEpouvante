@@ -123,16 +123,3 @@ chmod +x scripts/teardown-azure.sh
 ./scripts/teardown-azure.sh
 ```
 
-## Différenciation avec le projet Collector
-
-| Aspect | Collector | Petite Maison |
-|--------|-----------|---------------|
-| CI/CD | GitLab CI/CD | **GitHub Actions** |
-| Registry | GitLab Container Registry | **GHCR** |
-| Hébergement | Docker Compose local | **Azure Container Apps** |
-| SAST | Aucun | **CodeQL + npm audit** |
-| Load testing | Manuel (Siege/JMeter) | **k6 automatisé dans pipeline** |
-| Observabilité | Logs locaux | **Azure Monitor + Winston** |
-| Secrets | Fichier .env | **Azure Secrets + GitHub Secrets** |
-| Scaling | Manuel | **Auto-scaling 1-3 replicas** |
-| Dependabot | Non | **Oui (npm + Docker + Actions)** |

@@ -308,6 +308,5 @@ INSERT INTO users (email, password_hash, display_name) VALUES
     ('vendeur@petitemaison.fr', '$2b$12$QV1AYsKDDSNhVXMvhZGDyOCfclPS8ViBkxA6mnfVNDWq3dO1DxCLi', 'Vendeur');
 INSERT INTO user_roles (user_id, role) VALUES
     ((SELECT id FROM users WHERE email = 'admin@petitemaison.fr'), 'ADMIN'),
-    ((SELECT id FROM users WHERE email = 'admin@petitemaison.fr'), 'BUYER'),
     ((SELECT id FROM users WHERE email = 'client@petitemaison.fr'), 'BUYER'),
     ((SELECT id FROM users WHERE email = 'vendeur@petitemaison.fr'), 'SELLER');
