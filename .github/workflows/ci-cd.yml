@@ -120,7 +120,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: test_user
           POSTGRES_PASSWORD: test_password
@@ -262,7 +262,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend
+          images: ${{ env.REGISTRY }}/alexl130/petitemaisonepouvante-backend
           tags: |
             type=sha,prefix=
             type=ref,event=branch
@@ -303,7 +303,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend
+          images: ${{ env.REGISTRY }}/alexl130/petitemaisonepouvante-frontend
           tags: |
             type=sha,prefix=
             type=ref,event=branch
@@ -347,7 +347,7 @@ jobs:
         with:
           resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
           containerAppName: petite-maison-api
-          imageToDeploy: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:latest
+          imageToDeploy: ${{ env.REGISTRY }}/alexl130/petitemaisonepouvante-backend:latest
           targetPort: 4000
           ingress: external
           environmentVariables: >-
@@ -366,7 +366,7 @@ jobs:
         with:
           resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
           containerAppName: petite-maison-web
-          imageToDeploy: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:latest
+          imageToDeploy: ${{ env.REGISTRY }}/alexl130/petitemaisonepouvante-frontend:latest
           targetPort: 80
           ingress: external
 

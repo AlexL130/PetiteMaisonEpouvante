@@ -23,6 +23,8 @@ set -euo pipefail
 # ──────────────────────────────────────────────
 # CONFIGURATION (à adapter)
 # ──────────────────────────────────────────────
+
+JWT_SECRET=your-super-secure-jwt-secret-change-this-in-production
 RESOURCE_GROUP="rg-petitemaison"
 LOCATION="francecentral"
 ENV_NAME="cae-petitemaison"
@@ -163,7 +165,7 @@ PGPASSWORD="$PG_PASSWORD" psql \
   -h "$PG_HOST" \
   -U "$PG_USER" \
   -d "$PG_DB" \
-  -f docker/postgres/init.sql \
+  -f init.sql \
   --set=sslmode=require || echo "⚠️ Schema init failed — you may need to run it manually"
 
 # ──────────────────────────────────────────────
@@ -208,6 +210,7 @@ az containerapp secret set \
     db-user="$PG_USER" \
     db-password="$PG_PASSWORD" \
     db-name="$PG_DB" \
+    jwt-secret="$JWT_SECRET" \
     auth0-audience="$AUTH0_AUDIENCE" \
     auth0-domain="$AUTH0_DOMAIN" \
   --output none
@@ -224,6 +227,7 @@ az containerapp update \
     DB_USER=secretref:db-user \
     DB_PASSWORD=secretref:db-password \
     DB_NAME=secretref:db-name \
+    JWT_SECRET=secretref:jwt-secret \
     AUTH0_AUDIENCE=secretref:auth0-audience \
     AUTH0_DOMAIN=secretref:auth0-domain \
     FRONTEND_URL="https://FRONTEND_URL_PLACEHOLDER" \
